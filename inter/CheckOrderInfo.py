@@ -25,14 +25,14 @@ class checkOrderInfo:
         :return:
         """
         data = OrderedDict()
+        data['bed_level_order_num'] = "000000000000000000000000000000"
         data['passengerTicketStr'] = self.passengerTicketStrList.rstrip("_{0}".format(self.set_type))
         data['oldPassengerStr'] = self.oldPassengerStr
-        data['REPEAT_SUBMIT_TOKEN'] = self.token
+        data['tour_flag'] = 'dc'
         data['randCode'] = ""
         data['cancel_flag'] = 2
-        data['bed_level_order_num'] = "000000000000000000000000000000"
-        data['tour_flag'] = 'dc'
         data['_json_att'] = ""
+        data['REPEAT_SUBMIT_TOKEN'] = self.token
         return data
 
     def sendCheckOrderInfo(self):
@@ -45,7 +45,8 @@ class checkOrderInfo:
         CheckOrderInfoUrls = self.session.urls["checkOrderInfoUrl"]
         data = self.data_par()
         checkOrderInfoRep = self.session.httpClint.send(CheckOrderInfoUrls, data)
-        if 'data' in checkOrderInfoRep:
+        data = checkOrderInfoRep.get("data", {})
+        if data and data.get("submitStatus", False):
             print (u'车票提交通过，正在尝试排队')
             ifShowPassCodeTime = int(checkOrderInfoRep["data"]["ifShowPassCodeTime"]) / float(1000)
             if "ifShowPassCode" in checkOrderInfoRep["data"] and checkOrderInfoRep["data"]["ifShowPassCode"] == "Y":
@@ -67,7 +68,7 @@ class checkOrderInfo:
                                        self.passengerTicketStrList,
                                        )
             QueueCount.sendGetQueueCount()
-        elif "errMsg" in checkOrderInfoRep['data'] and checkOrderInfoRep['data']["errMsg"]:
-            print checkOrderInfoRep['data']["errMsg"]
+        elif "errMsg" in data and data["errMsg"]:
+            print(checkOrderInfoRep['data']["errMsg"])
         elif 'messages' in checkOrderInfoRep and checkOrderInfoRep['messages']:
             print (checkOrderInfoRep['messages'][0])

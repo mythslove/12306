@@ -1,18 +1,21 @@
 # -*- coding=utf-8 -*-
 import datetime
 import random
+import os
 import socket
 import sys
 import threading
 import time
+import TickerConfig
 import wrapcache
-
-from agency.cdn_utils import CDNProxy
-from config import urlConf
+from agency.cdn_utils import CDNProxy, open_cdn_file
+from config import urlConf, configCommon
 from config.TicketEnmu import ticket
-from config.ticketConf import _get_yaml
+from config.configCommon import seat_conf_2, seat_conf
+from config.getCookie import getDrvicesID
 from init.login import GoLogin
 from inter.AutoSubmitOrderRequest import autoSubmitOrderRequest
+from inter.ChechFace import chechFace
 from inter.CheckUser import checkUser
 from inter.GetPassengerDTOs import getPassengerDTOs
 from inter.LiftTicketInit import liftTicketInit
@@ -25,62 +28,56 @@ from myException.ticketIsExitsException import ticketIsExitsException
 from myException.ticketNumOutException import ticketNumOutException
 from myUrllib.httpUtils import HTTPClient
 
-reload(sys)
-sys.setdefaultencoding('utf-8')
-
 
 class select:
     """
     快速提交车票通道
     """
-
     def __init__(self):
-        self.from_station, self.to_station, self.station_dates, self._station_seat, self.is_more_ticket, \
-        self.ticke_peoples, self.station_trains, self.ticket_black_list_time, \
-        self.order_type = self.get_ticket_info()
-        self.is_auto_code = _get_yaml()["is_auto_code"]
-        self.auto_code_type = _get_yaml()["auto_code_type"]
-        self.is_cdn = _get_yaml()["is_cdn"]
-        self.httpClint = HTTPClient()
+        self.cdn_list = open_cdn_file("filter_cdn_list")
+        self.get_ticket_info()
+        self._station_seat = [seat_conf[x] for x in TickerConfig.SET_TYPE]
+        self.auto_code_type = TickerConfig.AUTO_CODE_TYPE
+        self.httpClint = HTTPClient(TickerConfig.IS_PROXY, self.cdn_list)
+        self.httpClint.cdn = self.cdn_list[random.randint(0, 4)]
         self.urls = urlConf.urls
-        self.login = GoLogin(self, self.is_auto_code, self.auto_code_type)
-        self.cdn_list = []
+        self.login = GoLogin(self, TickerConfig.IS_AUTO_CODE, self.auto_code_type)
+        self.cookies = ""
+        self.queryUrl = "leftTicket/queryO"
         self.passengerTicketStrList = ""
+        self.passengerTicketStrByAfterLate = ""
         self.oldPassengerStr = ""
+        self.set_type = ""
+        self.flag = True
 
-    def get_ticket_info(self):
+    @staticmethod
+    def get_ticket_info():
         """
         获取配置信息
         :return:
         """
-        ticket_info_config = _get_yaml()
-        from_station = ticket_info_config["set"]["from_station"].encode("utf8")
-        to_station = ticket_info_config["set"]["to_station"].encode("utf8")
-        station_dates = ticket_info_config["set"]["station_dates"]
-        set_type = ticket_info_config["set"]["set_type"]
-        is_more_ticket = ticket_info_config["set"]["is_more_ticket"]
-        ticke_peoples = ticket_info_config["set"]["ticke_peoples"]
-        station_trains = ticket_info_config["set"]["station_trains"]
-        ticket_black_list_time = ticket_info_config["ticket_black_list_time"]
-        order_type = ticket_info_config["order_type"]
-        print u"*" * 20
-        print u"12306刷票小助手，最后更新于2018.8.31，请勿作为商业用途，交流群号：286271084"
-        print u"如果有好的margin，请联系作者，表示非常感激\n"
-        print u"当前配置：出发站：{0}\n到达站：{1}\n乘车日期：{2}\n坐席：{3}\n是否有票自动提交：{4}\n乘车人：{5}\n" \
-              u"刷新间隔：随机(1-4S)\n候选购买车次：{6}\n僵尸票关小黑屋时长：{7}\n 下单接口：{8}\n".format \
-                (
-                from_station,
-                to_station,
-                station_dates,
-                ",".join(set_type),
-                is_more_ticket,
-                ",".join(ticke_peoples),
-                ",".join(station_trains),
-                ticket_black_list_time,
-                order_type,
-            )
-        print u"*" * 20
-        return from_station, to_station, station_dates, set_type, is_more_ticket, ticke_peoples, station_trains, ticket_black_list_time, order_type
+
+        print(u"*" * 50)
+        print(f"检查当前版本为: {TickerConfig.RE_VERSION}")
+        version = sys.version.split(" ")[0]
+        print(u"检查当前python版本为：{}，目前版本只支持3.6以上".format(version))
+        if version < "3.6.0":
+            raise Exception
+        print(u"12306刷票小助手，最后更新于2019.09.18，请勿作为商业用途，交流群号："
+              u" 1群：286271084(已满)\n"
+              u" 2群：649992274(已满)\n"
+              u" 3群：632501142(已满)\n"
+              u" 4群: 606340519(已满)\n"
+              u" 5群: 948526733(已满)\n"
+              u" 7群: 660689659(已满)\n"
+              u" 8群: 620629239(已满)\n"
+              u" 6群: 608792930(未满)\n"
+              u" 9群: 693035807(未满)\n"
+              )
+        print(
+            f"当前配置：\n出发站：{TickerConfig.FROM_STATION}\n到达站：{TickerConfig.TO_STATION}\n车次: {','.join(TickerConfig.STATION_TRAINS) or '所有车次'}\n乘车日期：{','.join(TickerConfig.STATION_DATES)}\n坐席：{','.join(TickerConfig.SET_TYPE)}\n是否有票优先提交：{TickerConfig.IS_MORE_TICKET}\n乘车人：{TickerConfig.TICKET_PEOPLES}\n" \
+            f"刷新间隔: 随机(1-3S)\n僵尸票关小黑屋时长: {TickerConfig.TICKET_BLACK_LIST_TIME}\n下单接口: {TickerConfig.ORDER_TYPE}\n下单模式: {TickerConfig.ORDER_MODEL}\n预售踩点时间:{TickerConfig.OPEN_TIME}")
+        print(u"*" * 50)
 
     def station_table(self, from_station, to_station):
         """
@@ -88,15 +85,24 @@ class select:
         :param station:
         :return:
         """
-        result = open('station_name.txt')
-        info = result.read().split('=')[1].strip("'").split('@')
+        path = os.path.join(os.path.dirname(__file__), '../station_name.txt')
+        try:
+            with open(path, encoding="utf-8") as result:
+                info = result.read().split('=')[1].strip("'").split('@')
+        except Exception:
+            with open(path) as result:
+                info = result.read().split('=')[1].strip("'").split('@')
         del info[0]
         station_name = {}
         for i in range(0, len(info)):
             n_info = info[i].split('|')
             station_name[n_info[1]] = n_info[2]
-        from_station = station_name[from_station.encode("utf8")]
-        to_station = station_name[to_station.encode("utf8")]
+        try:
+            from_station = station_name[from_station.encode("utf8")]
+            to_station = station_name[to_station.encode("utf8")]
+        except KeyError:
+            from_station = station_name[from_station]
+            to_station = station_name[to_station]
         return from_station, to_station
 
     def call_login(self, auth=False):
@@ -107,165 +113,140 @@ class select:
         if auth:
             return self.login.auth()
         else:
+            configCommon.checkSleepTime(self)  # 防止网上启动晚上到点休眠
             self.login.go_login()
 
-    def set_cdn(self):
-        """
-        设置cdn
-        :return:
-        """
-        if self.is_cdn == 1:
-            while True:
-                if self.cdn_list:
-                    self.httpClint.cdn = self.cdn_list[random.randint(0, len(self.cdn_list) - 1)]
-
-    def cdn_req(self, cdn):
-        for i in range(len(cdn) - 1):
-            http = HTTPClient()
-            urls = self.urls["loginInit"]
-            start_time = datetime.datetime.now()
-            http.cdn = cdn[i].replace("\n", "")
-            rep = http.send(urls)
-            if rep and "message" not in rep and (datetime.datetime.now() - start_time).microseconds / 1000 < 500:
-                print("加入cdn {0}".format(cdn[i].replace("\n", "")))
-                self.cdn_list.append(cdn[i].replace("\n", ""))
-        print(u"所有cdn解析完成...")
-
-    def cdn_certification(self):
-        """
-        cdn 认证
-        :return:
-        """
-        if self.is_cdn == 1:
-            CDN = CDNProxy()
-            all_cdn = CDN.all_cdn()
-            if all_cdn:
-                print(u"开启cdn查询")
-                print(u"本次待筛选cdn总数为{}".format(len(all_cdn)))
-                t = threading.Thread(target=self.cdn_req, args=(all_cdn,))
-                t2 = threading.Thread(target=self.set_cdn, args=())
-                t.start()
-                t2.start()
-            else:
-                raise ticketConfigException(u"cdn列表为空，请先加载cdn")
-        else:
-            pass
-
     def main(self):
-        self.cdn_certification()
-        l = liftTicketInit(session=self)
+        l = liftTicketInit(self)
         l.reqLiftTicketInit()
+        getDrvicesID(self)
         self.call_login()
-        checkUser(self).sendCheckUser()
-        from_station, to_station = self.station_table(self.from_station, self.to_station)
+        check_user = checkUser(self)
+        t = threading.Thread(target=check_user.sendCheckUser)
+        t.setDaemon(True)
+        t.start()
+        from_station, to_station = self.station_table(TickerConfig.FROM_STATION, TickerConfig.TO_STATION)
         num = 0
+        s = getPassengerDTOs(selectObj=self, ticket_peoples=TickerConfig.TICKET_PEOPLES)
+        passenger = s.sendGetPassengerDTOs()
+        wrapcache.set("user_info", passenger, timeout=9999999)
+
+        now = datetime.datetime.now()
+        if TickerConfig.ORDER_MODEL is 1:
+            print(f"预售还未开始，阻塞中，预售时间为{TickerConfig.OPEN_TIME}, 当前时间为: {now.strftime('%H:%M:%S')}")
+            sleep_time_s = 0.1
+            sleep_time_t = 0.3
+            # 测试了一下有微妙级的误差，应该不影响，测试结果：2019-01-02 22:30:00.004555，预售还是会受到前一次刷新的时间影响，暂时没想到好的解决方案
+            while now.strftime("%H:%M:%S") < TickerConfig.OPEN_TIME:
+                now = datetime.datetime.now()
+                time.sleep(0.0001)
+            print(f"预售开始，开启时间为: {now.strftime('%H:%M:%S')}")
+        else:
+            sleep_time_s = TickerConfig.MIN_TIME
+            sleep_time_t = TickerConfig.MAX_TIME
+
         while 1:
             try:
                 num += 1
-                checkUser(self).sendCheckUser()
-                if time.strftime('%H:%M:%S', time.localtime(time.time())) > "23:00:00" or time.strftime('%H:%M:%S',
-                                                                                                        time.localtime(
-                                                                                                            time.time())) < "06:00:00":
-                    print(ticket.REST_TIME)
-                    while 1:
-                        time.sleep(1)
-                        if "06:00:00" < time.strftime('%H:%M:%S', time.localtime(time.time())) < "23:00:00":
-                            print(ticket.REST_TIME_PAST)
-                            self.call_login()
-                            break
-                start_time = datetime.datetime.now()
-
-                q = query(session=self,
+                now = datetime.datetime.now()  # 感谢群里大佬提供整点代码
+                configCommon.checkSleepTime(self)  # 晚上到点休眠
+                q = query(selectObj=self,
                           from_station=from_station,
                           to_station=to_station,
-                          from_station_h=self.from_station,
-                          to_station_h=self.to_station,
+                          from_station_h=TickerConfig.FROM_STATION,
+                          to_station_h=TickerConfig.TO_STATION,
                           _station_seat=self._station_seat,
-                          station_trains=self.station_trains,
-                          station_dates=self.station_dates, )
+                          station_trains=TickerConfig.STATION_TRAINS,
+                          station_dates=TickerConfig.STATION_DATES,
+                          ticke_peoples_num=len(TickerConfig.TICKET_PEOPLES),
+                          )
                 queryResult = q.sendQuery()
                 # 查询接口
-                if queryResult.get("status", False):
+                if queryResult.get("status"):
                     train_no = queryResult.get("train_no", "")
                     train_date = queryResult.get("train_date", "")
                     stationTrainCode = queryResult.get("stationTrainCode", "")
-                    set_type = queryResult.get("set_type", "")
                     secretStr = queryResult.get("secretStr", "")
+                    secretList = queryResult.get("secretList", "")
+                    seat = queryResult.get("seat", "")
                     leftTicket = queryResult.get("leftTicket", "")
                     query_from_station_name = queryResult.get("query_from_station_name", "")
                     query_to_station_name = queryResult.get("query_to_station_name", "")
+                    is_more_ticket_num = queryResult.get("is_more_ticket_num", len(TickerConfig.TICKET_PEOPLES))
                     if wrapcache.get(train_no):
                         print(ticket.QUEUE_WARNING_MSG.format(train_no))
                     else:
                         # 获取联系人
-                        if not self.passengerTicketStrList and not self.oldPassengerStr:
-                            s = getPassengerDTOs(session=self, ticket_peoples=self.ticke_peoples, set_type=set_type)
-                            getPassengerDTOsResult = s.getPassengerTicketStrListAndOldPassengerStr()
-                            if getPassengerDTOsResult.get("status", False):
-                                self.passengerTicketStrList = getPassengerDTOsResult.get("passengerTicketStrList", "")
-                                self.oldPassengerStr = getPassengerDTOsResult.get("oldPassengerStr", "")
-                                set_type = getPassengerDTOsResult.get("set_type", "")
+                        s = getPassengerDTOs(selectObj=self, ticket_peoples=TickerConfig.TICKET_PEOPLES,
+                                             set_type="" if isinstance(seat, list) else seat_conf_2[seat],
+                                             # 候补订单需要设置多个坐席
+                                             is_more_ticket_num=is_more_ticket_num)
+                        getPassengerDTOsResult = s.getPassengerTicketStrListAndOldPassengerStr(secretStr, secretList)
+                        if getPassengerDTOsResult.get("status", False):
+                            self.passengerTicketStrList = getPassengerDTOsResult.get("passengerTicketStrList", "")
+                            self.passengerTicketStrByAfterLate = getPassengerDTOsResult.get(
+                                "passengerTicketStrByAfterLate", "")
+                            self.oldPassengerStr = getPassengerDTOsResult.get("oldPassengerStr", "")
+                            self.set_type = getPassengerDTOsResult.get("set_type", "")
                         # 提交订单
-                        if self.order_type == 1:  # 快读下单
-                            a = autoSubmitOrderRequest(session=self,
-                                                       secretStr=secretStr,
-                                                       train_date=train_date,
-                                                       passengerTicketStr=self.passengerTicketStrList,
-                                                       oldPassengerStr=self.oldPassengerStr,
-                                                       train_no=train_no,
-                                                       stationTrainCode=stationTrainCode,
-                                                       leftTicket=leftTicket,
-                                                       set_type=set_type,
-                                                       query_from_station_name=query_from_station_name,
-                                                       query_to_station_name=query_to_station_name,
-                                                       )
-                            a.sendAutoSubmitOrderRequest()
-                        elif self.order_type == 2:  # 普通下单
-                            sor = submitOrderRequest(self, secretStr, from_station, to_station, train_no, set_type,
-                                                     self.passengerTicketStrList, self.oldPassengerStr, train_date,
-                                                     self.ticke_peoples)
-                            sor.sendSubmitOrderRequest()
-
-
+                        # 订单分为两种，一种为抢单，一种为候补订单
+                        if secretStr:  # 正常下单
+                            if TickerConfig.ORDER_TYPE == 1:  # 快速下单
+                                a = autoSubmitOrderRequest(selectObj=self,
+                                                           secretStr=secretStr,
+                                                           train_date=train_date,
+                                                           passengerTicketStr=self.passengerTicketStrList,
+                                                           oldPassengerStr=self.oldPassengerStr,
+                                                           train_no=train_no,
+                                                           stationTrainCode=stationTrainCode,
+                                                           leftTicket=leftTicket,
+                                                           set_type=self.set_type,
+                                                           query_from_station_name=query_from_station_name,
+                                                           query_to_station_name=query_to_station_name,
+                                                           )
+                                a.sendAutoSubmitOrderRequest()
+                            elif TickerConfig.ORDER_TYPE == 2:  # 普通下单
+                                sor = submitOrderRequest(self, secretStr, from_station, to_station, train_no,
+                                                         self.set_type,
+                                                         self.passengerTicketStrList, self.oldPassengerStr, train_date,
+                                                         TickerConfig.TICKET_PEOPLES)
+                                sor.sendSubmitOrderRequest()
+                        elif secretList:  # 候补订单
+                            c = chechFace(self, secretList, train_no)
+                            c.sendChechFace()
                 else:
-                    random_time = round(random.uniform(1, 4), 2)
+                    random_time = round(random.uniform(sleep_time_s, sleep_time_t), 2)
+                    nateMsg = ' 无候补机会' if TickerConfig.ORDER_TYPE == 2 else ""
+                    print(f"正在第{num}次查询 停留时间：{random_time} 乘车日期: {','.join(TickerConfig.STATION_DATES)} 车次：{','.join(TickerConfig.STATION_TRAINS) or '所有车次'} 下单无票{nateMsg} 耗时：{(datetime.datetime.now() - now).microseconds / 1000} {queryResult.get('cdn')}")
                     time.sleep(random_time)
-                    print u"正在第{0}次查询 随机停留时长：{6} 乘车日期: {1} 车次：{2} 查询无票 cdn轮询IP：{4}当前cdn总数：{5} 总耗时：{3}ms".format(num,
-                                                                                                                ",".join(
-                                                                                                                    self.station_dates),
-                                                                                                                ",".join(
-                                                                                                                    self.station_trains),
-                                                                                                                (datetime.datetime.now() - start_time).microseconds / 1000,
-                                                                                                                self.httpClint.cdn,
-                                                                                                                len(self.cdn_list),
-                                                                                                                random_time)
             except PassengerUserException as e:
-                print e.message
+                print(e)
                 break
             except ticketConfigException as e:
-                print e.message
+                print(e)
                 break
             except ticketIsExitsException as e:
-                print e.message
+                print(e)
                 break
             except ticketNumOutException as e:
-                print e.message
+                print(e)
                 break
             except UserPasswordException as e:
-                print e.message
+                print(e)
                 break
             except ValueError as e:
-                if e.message == "No JSON object could be decoded":
+                if e == "No JSON object could be decoded":
                     print(u"12306接口无响应，正在重试")
                 else:
-                    print(e.message)
+                    print(e)
             except KeyError as e:
-                print(e.message)
+                print(e)
             except TypeError as e:
-                print(u"12306接口无响应，正在重试 {0}".format(e.message))
+                print(u"12306接口无响应，正在重试 {0}".format(e))
             except socket.error as e:
-                print(e.message)
+                print(e)
 
 
 if __name__ == '__main__':
-    pass
+    s = select()
+    cdn = s.station_table("长沙", "深圳")

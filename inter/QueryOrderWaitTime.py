@@ -4,6 +4,7 @@ import time
 
 from config.TicketEnmu import ticket
 from config.emailConf import sendEmail
+from config.serverchanConf import sendServerChan
 from myException.ticketIsExitsException import ticketIsExitsException
 from myException.ticketNumOutException import ticketNumOutException
 
@@ -42,10 +43,12 @@ class queryOrderWaitTime:
                     if data and data.get("orderId", ""):
                         sendEmail(ticket.WAIT_ORDER_SUCCESS.format(
                             data.get("orderId", "")))
+                        sendServerChan(ticket.WAIT_ORDER_SUCCESS.format(
+                            data.get("orderId", "")))
                         raise ticketIsExitsException(ticket.WAIT_ORDER_SUCCESS.format(
                             data.get("orderId")))
                     elif data.get("msg", False):
-                        print data.get("msg", "")
+                        print(data.get("msg", ""))
                         break
                     elif data.get("waitTime", False):
                         print(ticket.WAIT_ORDER_CONTINUE.format(0 - data.get("waitTime", False)))
@@ -75,8 +78,7 @@ class queryOrderWaitTime:
             queryMyOrderNoCompleteResult = {}
         if queryMyOrderNoCompleteResult:
             if queryMyOrderNoCompleteResult.get("data", False) and queryMyOrderNoCompleteResult["data"].get("orderDBList", False):
-                orderId = queryMyOrderNoCompleteResult["data"]["orderDBList"][0]["sequence_no"]
-                return orderId
+                return queryMyOrderNoCompleteResult["data"]
             elif queryMyOrderNoCompleteResult.get("data", False) and queryMyOrderNoCompleteResult["data"].get("orderCacheDTO", False):
                 if queryMyOrderNoCompleteResult["data"]["orderCacheDTO"].get("message", False):
                     print(queryMyOrderNoCompleteResult["data"]["orderCacheDTO"]["message"]["message"])
@@ -84,7 +86,7 @@ class queryOrderWaitTime:
                         queryMyOrderNoCompleteResult["data"]["orderCacheDTO"]["message"]["message"])
             else:
                 if queryMyOrderNoCompleteResult.get("message", False):
-                    print queryMyOrderNoCompleteResult.get("message", False)
+                    print(queryMyOrderNoCompleteResult.get("message", False))
                     return False
                 else:
                     return False
@@ -96,7 +98,6 @@ class queryOrderWaitTime:
         获取订单前需要进入订单列表页，获取订单列表页session
         :return:
         """
-        self.session.httpClint.set_cookies(acw_tc="AQAAAEnFJnekLwwAtGHjZZCr79B6dpXk", current_captcha_type="Z")
         initNoCompleteUrl = self.session.urls["initNoCompleteUrl"]
         data = {"_json_att": ""}
         self.session.httpClint.send(initNoCompleteUrl, data)
